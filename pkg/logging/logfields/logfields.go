@@ -572,6 +572,8 @@ const (
 	// SourceIP is a source IP
 	SourceIP = "sourceIP"
 
+	SourceCIDR = "sourceCIDR"
+
 	// DestinationCIDR is a destination CIDR
 	DestinationCIDR = "destinationCIDR"
 

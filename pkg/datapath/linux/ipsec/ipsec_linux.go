@@ -16,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cilium/cilium/pkg/datapath"
@@ -45,6 +46,9 @@ const (
 	// ipSecXfrmMarkSPIShift defines how many bits the SPI is shifted when
 	// encoded in a XfrmMark
 	ipSecXfrmMarkSPIShift = 12
+
+	defaultDropPriority      = 100
+	oldXFRMOutPolicyPriority = 50
 )
 
 type ipSecKey struct {
@@ -70,6 +74,42 @@ var (
 	// replaced with a newer one, allowing to reclaim old keys only after
 	// enough time has passed since their replacement
 	ipSecKeysRemovalTime = make(map[uint8]time.Time)
+
+	wildcardIPv4   = net.ParseIP("0.0.0.0")
+	wildcardCIDRv4 = &net.IPNet{
+		IP:   wildcardIPv4,
+		Mask: net.IPv4Mask(0, 0, 0, 0),
+	}
+	wildcardIPv6   = net.ParseIP("0::0")
+	wildcardCIDRv6 = &net.IPNet{
+		IP:   wildcardIPv6,
+		Mask: net.CIDRMask(128, 128),
+	}
+
+	defaultDropMark = &netlink.XfrmMark{
+		Value: linux_defaults.RouteMarkEncrypt,
+		Mask:  linux_defaults.IPsecMarkMaskIn,
+	}
+	defaultDropPolicyIPv4 = &netlink.XfrmPolicy{
+		Dir:      netlink.XFRM_DIR_OUT,
+		Src:      wildcardCIDRv4,
+		Dst:      wildcardCIDRv4,
+		Mark:     defaultDropMark,
+		Action:   netlink.XFRM_POLICY_BLOCK,
+		Priority: defaultDropPriority,
+	}
+	defaultDropPolicyIPv6 = &netlink.XfrmPolicy{
+		Dir:      netlink.XFRM_DIR_OUT,
+		Src:      wildcardCIDRv6,
+		Dst:      wildcardCIDRv6,
+		Mark:     defaultDropMark,
+		Action:   netlink.XFRM_POLICY_BLOCK,
+		Priority: defaultDropPriority,
+	}
+
+	// To attempt to remove any stale XFRM configs once at startup, after
+	// we've added the catch-all default-drop policy.
+	removeStaleXFRMOnce sync.Once
 )
 
 func getIPSecKeys(ip net.IP) *ipSecKey {
@@ -805,4 +845,63 @@ func StartStaleKeysReclaimer(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func IPsecDefaultDropPolicy(ipv6 bool) error {
+	defaultDropPolicy := defaultDropPolicyIPv4
+	family := netlink.FAMILY_V4
+	if ipv6 {
+		defaultDropPolicy = defaultDropPolicyIPv6
+		family = netlink.FAMILY_V6
+	}
+
+	err := netlink.XfrmPolicyUpdate(defaultDropPolicy)
+
+	// We move the existing XFRM OUT policy to a lower priority to allow the
+	// new priorities to take precedence.
+	// This code can be removed in Cilium v1.15 to instead remove the old XFRM
+	// OUT policy and state.
+	removeStaleXFRMOnce.Do(func() {
+		deprioritizeOldOutPolicy(family)
+	})
+
+	return err
+}
+
+func deprioritizeOldOutPolicy(family int) {
+	policies, err := netlink.XfrmPolicyList(family)
+	if err != nil {
+		log.WithError(err).Error("Cannot get XFRM policies")
+	}
+	for _, p := range policies {
+		if p.Dir == netlink.XFRM_DIR_OUT && p.Mark.Mask == linux_defaults.IPsecMarkMaskOut {
+			p.Priority = oldXFRMOutPolicyPriority
+			if err := netlink.XfrmPolicyUpdate(&p); err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					logfields.SourceCIDR:      p.Src,
+					logfields.DestinationCIDR: p.Dst,
+				}).Error("Failed to deprioritize old XFRM out policy")
+			}
+		}
+		// draft for test
+		if p.Dir == netlink.XFRM_DIR_IN {
+			p.Priority++
+			if err := netlink.XfrmPolicyUpdate(&p); err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					logfields.SourceCIDR:      p.Src,
+					logfields.DestinationCIDR: p.Dst,
+				}).Error("Failed to deprioritize old XFRM in policy")
+			}
+		}
+		// draft for test
+		if p.Dir == netlink.XFRM_DIR_FWD {
+			p.Priority++
+			if err := netlink.XfrmPolicyUpdate(&p); err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					logfields.SourceCIDR:      p.Src,
+					logfields.DestinationCIDR: p.Dst,
+				}).Error("Failed to deprioritize old XFRM fwd policy")
+			}
+		}
+	}
 }

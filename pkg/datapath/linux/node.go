@@ -325,7 +325,6 @@ func (n *linuxNodeHandler) deleteDirectRoute(CIDR *cidr.CIDR, nodeIP net.IP) {
 // Example:
 // 10.10.0.0/24 via 10.10.0.1 dev cilium_host src 10.10.0.1
 // f00d::a0a:0:0:0/112 via f00d::a0a:0:0:1 dev cilium_host src fd04::11 metric 1024 pref medium
-//
 func (n *linuxNodeHandler) createNodeRouteSpec(prefix *cidr.CIDR, isLocalNode bool) (route.Route, error) {
 	var (
 		local, nexthop net.IP
@@ -535,6 +534,9 @@ func (n *linuxNodeHandler) enableSubnetIPsec(v4CIDR, v6CIDR []*net.IPNet) {
 		if !option.Config.EnableEndpointRoutes {
 			n.replaceNodeIPSecInRoute(cidr)
 		}
+
+		err = ipsec.IPsecDefaultDropPolicy(false)
+		upsertIPsecLog(err, "default-drop IPv4", cidr, cidr, spi)
 
 		n.replaceNodeIPSecOutRoute(cidr)
 		spi, err = ipsec.UpsertIPsecEndpoint(ipsecIPv4Wildcard, cidr, wildcardIP, cidr.IP, ipsec.IPSecDirOut, zeroMark)
