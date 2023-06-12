@@ -1,6 +1,9 @@
 package netlink
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	"github.com/vishvananda/netlink/nl"
 	"golang.org/x/sys/unix"
 )
@@ -33,6 +36,7 @@ func selFromPolicy(sel *nl.XfrmSelector, policy *XfrmPolicy) {
 // XfrmPolicyAdd will add an xfrm policy to the system.
 // Equivalent to: `ip xfrm policy add $policy`
 func XfrmPolicyAdd(policy *XfrmPolicy) error {
+	fmt.Printf("XfrmPolicyAdd: policy: %s %s\n", policy.String(), string(debug.Stack()))
 	return pkgHandle.XfrmPolicyAdd(policy)
 }
 
@@ -45,6 +49,7 @@ func (h *Handle) XfrmPolicyAdd(policy *XfrmPolicy) error {
 // XfrmPolicyUpdate will update an xfrm policy to the system.
 // Equivalent to: `ip xfrm policy update $policy`
 func XfrmPolicyUpdate(policy *XfrmPolicy) error {
+	fmt.Printf("XfrmPolicyUpdate: policy: %s %s\n", policy.String(), string(debug.Stack()))
 	return pkgHandle.XfrmPolicyUpdate(policy)
 }
 
@@ -106,6 +111,7 @@ func (h *Handle) xfrmPolicyAddOrUpdate(policy *XfrmPolicy, nlProto int) error {
 // the Tmpls are ignored when matching the policy to delete.
 // Equivalent to: `ip xfrm policy del $policy`
 func XfrmPolicyDel(policy *XfrmPolicy) error {
+	fmt.Printf("XfrmPolicyDel: policy: %s %s\n", policy.String(), string(debug.Stack()))
 	return pkgHandle.XfrmPolicyDel(policy)
 }
 

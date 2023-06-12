@@ -2,6 +2,7 @@ package netlink
 
 import (
 	"fmt"
+	"runtime/debug"
 	"unsafe"
 
 	"github.com/vishvananda/netlink/nl"
@@ -80,6 +81,7 @@ func writeReplayEsn(replayWindow int) []byte {
 // XfrmStateAdd will add an xfrm state to the system.
 // Equivalent to: `ip xfrm state add $state`
 func XfrmStateAdd(state *XfrmState) error {
+	fmt.Printf("XfrmStateAdd: %s %s\n", state, string(debug.Stack()))
 	return pkgHandle.XfrmStateAdd(state)
 }
 
@@ -98,6 +100,7 @@ func XfrmStateAllocSpi(state *XfrmState) (*XfrmState, error) {
 // XfrmStateUpdate will update an xfrm state to the system.
 // Equivalent to: `ip xfrm state update $state`
 func XfrmStateUpdate(state *XfrmState) error {
+	fmt.Printf("XfrmStateUpdate: %s %s\n", state, string(debug.Stack()))
 	return pkgHandle.XfrmStateUpdate(state)
 }
 
@@ -204,6 +207,7 @@ func (h *Handle) xfrmStateAllocSpi(state *XfrmState) (*XfrmState, error) {
 // the Algos are ignored when matching the state to delete.
 // Equivalent to: `ip xfrm state del $state`
 func XfrmStateDel(state *XfrmState) error {
+	fmt.Printf("XfrmStateDel: %s %s\n", state, string(debug.Stack()))
 	return pkgHandle.XfrmStateDel(state)
 }
 
