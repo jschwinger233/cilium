@@ -231,6 +231,8 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	int l3_off = ETH_HLEN;
 	struct remote_endpoint_info *info = NULL;
 	struct endpoint_info *ep;
+	__u8 __maybe_unused encrypt_key;
+	bool __maybe_unused from_proxy;
 	int ret;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
@@ -335,11 +337,20 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	dst = (union v6addr *) &ip6->daddr;
 	info = ipcache_lookup6(&IPCACHE_MAP, dst, V6_CACHE_KEY_LEN, 0);
 
+	encrypt_key = 0;
+#if defined(ENABLE_IPSEC)
+	//from_proxy = (ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_PROXY_INGRESS;
+	from_proxy = true;
+	if (from_host && info && from_proxy)
+		encrypt_key = get_min_encrypt_key(info->key);
+#endif
+
+	/* The following code block handles IPsec encryption for tunnel mode. */
 #ifdef TUNNEL_MODE
 	if (info != NULL && info->tunnel_endpoint != 0) {
 		return encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
-						      secctx, info->sec_identity,
-						      &trace);
+						      encrypt_key, secctx,
+						      info->sec_identity, &trace);
 	} else {
 		struct tunnel_key key = {};
 
@@ -360,6 +371,14 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		/* See IPv4 comment. */
 		return DROP_UNROUTABLE;
 	}
+
+	/* The following code block handles IPsec encryption for non-tunnel mode. */
+#ifdef ENABLE_IPSEC
+	if (info && info->tunnel_endpoint)
+		return set_ipsec_encrypt(ctx, encrypt_key, info->tunnel_endpoint,
+					 info->sec_identity);
+#endif
+
 	return CTX_ACT_OK;
 }
 
@@ -618,6 +637,8 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 	struct iphdr *ip4;
 	struct remote_endpoint_info *info;
 	struct endpoint_info *ep;
+	__u8 __maybe_unused encrypt_key;
+	bool __maybe_unused from_proxy;
 	int ret;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
@@ -743,11 +764,20 @@ skip_vtep:
 
 	info = ipcache_lookup4(&IPCACHE_MAP, ip4->daddr, V4_CACHE_KEY_LEN, 0);
 
+	encrypt_key = 0;
+#if defined(ENABLE_IPSEC)
+	//from_proxy = (ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_PROXY_INGRESS;
+	from_proxy = true;
+	if (from_host && info && from_proxy)
+		encrypt_key = get_min_encrypt_key(info->key);
+#endif
+
+	/* The following code block handles IPsec encryption for tunnel mode. */
 #ifdef TUNNEL_MODE
 	if (info != NULL && info->tunnel_endpoint != 0) {
 		return encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
-						      secctx, info->sec_identity,
-						      &trace);
+						      encrypt_key, secctx,
+						      info->sec_identity, &trace);
 	} else {
 		/* IPv4 lookup key: daddr & IPV4_MASK */
 		struct tunnel_key key = {};
@@ -774,6 +804,14 @@ skip_vtep:
 		 */
 		return DROP_UNROUTABLE;
 	}
+
+	/* The following code block handles IPsec encryption for non-tunnel mode. */
+#ifdef ENABLE_IPSEC
+	if (info && info->tunnel_endpoint && encrypt_key)
+		return set_ipsec_encrypt(ctx, encrypt_key, info->tunnel_endpoint,
+					 info->sec_identity);
+#endif
+
 	return CTX_ACT_OK;
 }
 
@@ -1153,6 +1191,7 @@ do_netdev(struct __ctx_buff *ctx, __u16 proto, const bool from_host)
 			 */
 			ctx_store_meta(ctx, CB_IPCACHE_SRC_LABEL, ipcache_srcid);
 # endif /* defined(ENABLE_HOST_FIREWALL) && !defined(ENABLE_MASQUERADE_IPV4) */
+
 			ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_HOST);
 		} else {
 			ep_tail_call(ctx, CILIUM_CALL_IPV4_FROM_NETDEV);
